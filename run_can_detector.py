@@ -64,12 +64,12 @@ def save_sample(flat_dir, labels_dir, boxed_dir, raw_bgr, box_xyxy, is_negative=
     return sample_id
 
 def main():
-    # -------- Config --------
+ 
     dataset_root = "dataset"         
     weights_path = "models/frcnn_best.pth"
-    source = 0 # webcam; or "video.mp4"
+    source = 0
 
-    # display threshold 
+ 
     score_thresh = 0.20
 
     
@@ -79,12 +79,6 @@ def main():
     draw_only_best = True                
     smoothing = 0.35                     
 
-    # Keys:
-    #   q / ESC : quit
-    #   a       : toggle autosave on/off
-    #   s       : save current detection if >= score_thresh
-    #   n       : save negative (empty label)
-    # ------------------------
 
     flat_dir, labels_dir, boxed_dir = ensure_dirs(dataset_root)
 
@@ -183,13 +177,13 @@ def main():
             autosave_enabled = not autosave_enabled
             print("autosave_enabled =", autosave_enabled)
 
-        # Manual save positive 
+ 
         if k == ord("s") and box_xyxy is not None:
             sid = save_sample(flat_dir, labels_dir, boxed_dir, raw, box_xyxy, is_negative=False,
                               tag=f"manual {best_s:.2f}")
             print("Manual saved:", sid, "score:", f"{best_s:.2f}")
 
-        # Manual save negative 
+
         if k == ord("n"):
             sid = save_sample(flat_dir, labels_dir, boxed_dir, raw, None, is_negative=True, tag="manual")
             print("Saved NEGATIVE:", sid)

@@ -2,7 +2,7 @@ import os
 import glob
 import cv2
 
-# -------- Config --------
+
 DATASET_DIR = "dataset"
 BOXED_DIR = os.path.join(DATASET_DIR, "boxed")
 FLAT_DIR = os.path.join(DATASET_DIR, "flat")
@@ -31,7 +31,7 @@ def label_path(img_id: str) -> str:
 
 
 def boxed_path(img_id: str) -> str:
-    return os.path.join(BOXED_DIR, img_id + ".jpg")  # your pipeline uses .jpg previews
+    return os.path.join(BOXED_DIR, img_id + ".jpg")  
 
 
 def load_box(lbl_path: str):
@@ -90,10 +90,6 @@ def draw(img, box, temp_box=None, text=None):
 
 
 def write_boxed_preview(img_id: str, flat_img, box):
-    """
-    Regenerate dataset/boxed/<id>.jpg so it matches the edited label.
-    If box is None, it still writes the image with no rectangle (keeps file present).
-    """
     os.makedirs(BOXED_DIR, exist_ok=True)
     preview = flat_img.copy()
     if box is not None:
@@ -102,7 +98,6 @@ def write_boxed_preview(img_id: str, flat_img, box):
     cv2.imwrite(boxed_path(img_id), preview)
 
 
-# ------- Mouse state -------
 drawing = False
 start_pt = None
 temp_box = None
@@ -111,7 +106,7 @@ temp_box = None
 def main():
     global drawing, start_pt, temp_box
 
-    # Only work on items that exist in dataset/boxed
+
     boxed_files = sorted(glob.glob(os.path.join(BOXED_DIR, "*.jpg")) +
                          glob.glob(os.path.join(BOXED_DIR, "*.png")) +
                          glob.glob(os.path.join(BOXED_DIR, "*.jpeg")))
@@ -199,7 +194,6 @@ def main():
                 temp_box = None
 
             elif key == ord('s'):
-                # Save label and regenerate boxed preview so training set matches edits
                 save_box(lblp, new_box)
                 write_boxed_preview(img_id, img, new_box)
                 saves += 1

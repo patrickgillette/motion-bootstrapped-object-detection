@@ -80,7 +80,7 @@ def main():
     dataset_root = "dataset"
 
     # If you *know* your USB cam index, set it here (common: 1)
-    preferred_cam_index = 1  # change to None to auto-scan without preference
+    preferred_cam_index = 0  # change to None to auto-scan without preference
 
     # Motion detection (classic)
     history = 500
