@@ -1,28 +1,30 @@
-# Can Detector — Real-Time Object Detection with Active Learning
+# Real-Time Object Detector — Capture, Annotate, Train, Deploy
 
-A complete machine learning pipeline for training and deploying a real-time object detector, built around PyTorch's Faster R-CNN. The system is designed around an **active learning loop**: capture data from a live camera, annotate it, train a model, run inference, and continuously feed high-confidence detections back into the training set to improve the model over time.
+A general-purpose machine learning pipeline for training and deploying a custom real-time object detector on **any single object class** — no labeling service, no cloud dependency, no pre-existing dataset required. Point a camera at something, collect data, train, and detect.
 
----
+The system is built around an **active learning loop**: motion-triggered capture builds your dataset automatically, an interactive annotator lets you clean it up, and the live inference tool can feed high-confidence detections back into training data to improve the model over time.
 
-## Overview
-
-This project demonstrates the full ML lifecycle for a practical computer vision problem:
-
-1. **Capture** — motion-triggered dataset collection from a live camera feed
-2. **Annotate** — interactive bounding box editor for correcting or relabeling captures
-3. **Train** — fine-tune a Faster R-CNN (ResNet-50 FPN backbone) on your dataset
-4. **Detect** — run live inference and optionally auto-save high-confidence frames back to the dataset
-
-The result is a self-improving detection system that gets better the more it runs.
+> **Demonstrated on:** steel cans (single object) and stacked pallets of cans in an industrial environment — but the pipeline is object-agnostic.
 
 ---
 
-##Example
+## Motivation
+
+This project was built to add low-cost machine vision to conveyor control systems. Once trained, the model can be consumed by a separate Python script that uses the [pylogix](https://github.com/dmroeder/pylogix) library to write PLC tags based on detection output — for example, indicating which zone a pallet is currently occupying on a conveyor line. This gives a PLC the spatial awareness to make control decisions (stopping a conveyor, triggering a divert, gating a process) without dedicated hardware vision sensors.
+
+This repository covers the **training side** of that system: building and iteratively improving the detection model. The inference output is intentionally simple (a bounding box + confidence score) so it's straightforward to consume from any downstream script or integration.
+
+---
+
+## Example
+
 ![Demo](demo.jpg)
 
+*Pallet detection in a factory setting.*
+
 ---
 
-## Architecture
+## How It Works
 
 ```
 capture_motion_dataset.py   →   dataset/flat/        (raw frames)
@@ -36,19 +38,42 @@ train_torch_detector.py     →   models/frcnn_best.pth
 run_can_detector.py         →   live inference + optional autosave back to dataset
 ```
 
+Each step feeds the next. Running the detector in autosave mode continuously grows your dataset, and periodic retraining improves accuracy — without any manual labeling effort.
+
+The model only trains from images that exist in the dataset/boxed directory. Before training you can look through this and remove anything you dont want in your trainingset and the respective flat image and labels will be ignored. This creates an easy to use loop to fine tune and guide your training. 
+
+---
+
+## Quickstart
+
+```bash
+# 1. Collect initial training data — aim the camera at your object and move it around
+python capture_motion_dataset.py
+
+# 2. (Optional) Review and correct bounding boxes
+python box_corrector.py
+
+# 3. Train the model
+python train_torch_detector.py
+
+# 4. Run the detector live — press 'a' to enable autosave and keep growing your dataset
+python run_can_detector.py
+```
+
+Repeat steps 1 → 3 as you accumulate more data. The more the detector runs, the better it gets.
+
 ---
 
 ## Scripts
 
 ### `capture_motion_dataset.py` — Motion-Triggered Data Collection
 
-Uses OpenCV's MOG2 background subtractor to detect moving objects and automatically save annotated frames at a configurable rate. Includes black-region suppression to reduce false positives from dark backgrounds.
+Uses OpenCV's MOG2 background subtractor to detect moving objects and automatically save annotated frames at a configurable rate. Includes black-region suppression because I was using a black handle to move the can I wanted to train on. Remove this if you need to train on a black object.
 
-**Key features:**
 - Auto-scans for available cameras or uses a preferred index
 - Configurable motion sensitivity, minimum contour area, and save cooldown
 - `s` — manually save a positive sample
-- `n` — save a negative (no-object) sample
+- `n` — save a negative (background-only) sample
 - `q` / `ESC` — quit
 
 ```bash
@@ -59,13 +84,12 @@ python capture_motion_dataset.py
 
 ### `box_corrector.py` — Bounding Box Annotation Tool
 
-An interactive OpenCV-based annotator for reviewing and correcting bounding boxes on existing dataset images. Iterates through every image in `dataset/boxed/`, loads the corresponding flat image and label, and lets you draw a new box or clear the existing one.
+An interactive OpenCV-based annotator for reviewing and correcting bounding boxes on existing dataset images. Iterates through every image in `dataset/boxed/` and lets you redraw or clear boxes before training.
 
-**Controls:**
 | Key | Action |
 |-----|--------|
 | Drag | Draw new bounding box |
-| `s` | Save box and advance |
+| `s` | Save and advance |
 | `x` | Clear current box |
 | `n` / `p` | Next / previous image |
 | `q` / `ESC` | Quit |
@@ -78,20 +102,17 @@ python box_corrector.py
 
 ### `train_torch_detector.py` — Model Training
 
-Fine-tunes a pretrained Faster R-CNN (ResNet-50 FPN) on your captured dataset. Handles train/val splitting automatically and saves the best checkpoint by validation loss.
+Fine-tunes a pretrained Faster R-CNN (ResNet-50 FPN backbone) on your dataset. Handles train/val splitting automatically and saves the best checkpoint by validation loss.
 
-**Key details:**
-- Uses ImageNet-pretrained backbone weights for fast convergence
-- 80/20 train/val split (reproducible via seed; splits are cached to `dataset/splits/`)
-- Horizontal flip augmentation during training
-- AdamW optimizer, configurable LR and epochs
-- Saves best model to `models/frcnn_best.pth`
+- ImageNet-pretrained backbone weights for fast convergence on small datasets
+- 80/20 train/val split, reproducible via seed (splits cached to `dataset/splits/`)
+- Horizontal flip augmentation
+- AdamW optimizer
+- Best model saved to `models/frcnn_best.pth`
 
 ```bash
 python train_torch_detector.py
 ```
-
-Default hyperparameters (edit in `main()`):
 
 | Parameter | Default |
 |-----------|---------|
@@ -105,14 +126,13 @@ Default hyperparameters (edit in `main()`):
 
 ### `run_can_detector.py` — Live Inference
 
-Loads the trained model and runs real-time detection on a camera feed. Includes exponential smoothing for stable bounding boxes and an autosave mode that feeds high-confidence detections back into the training dataset.
+Loads the trained model and runs real-time detection on a camera feed. Includes exponential box smoothing and an autosave mode that feeds high-confidence frames back into the training dataset.
 
-**Key features:**
-- Configurable score threshold and autosave threshold
+- Configurable score and autosave thresholds
 - Box smoothing across frames to reduce jitter
-- `a` — toggle autosave mode (saves frames where score ≥ threshold)
-- `s` — manually save current detection as a positive sample
-- `n` — save current frame as a negative sample
+- `a` — toggle autosave mode
+- `s` — manually save current detection as a positive
+- `n` — save current frame as a negative
 - `q` / `ESC` — quit
 
 ```bash
@@ -123,64 +143,31 @@ python run_can_detector.py
 
 ## Dataset Format
 
-All data lives under a `dataset/` directory with three subdirectories:
-
 ```
 dataset/
 ├── flat/        # Raw captured frames (JPEG)
-├── labels/      # One .txt per image: "x1 y1 x2 y2" or empty for negatives
-└── boxed/       # Preview images with bounding boxes drawn
+├── labels/      # One .txt per image: "x1 y1 x2 y2", or empty for negatives
+├── boxed/       # Preview images with bounding boxes drawn
+└── splits/      # Auto-generated train/val split lists
 ```
 
-Labels use absolute pixel coordinates in `x1 y1 x2 y2` format. An empty label file indicates a negative (background-only) sample.
-
----
-
-## Requirements
-
-```
-torch
-torchvision
-opencv-python
-numpy
-Pillow
-```
-
-Install with:
-
-```bash
-pip install torch torchvision opencv-python numpy Pillow
-```
-
-GPU training is strongly recommended but not required — the training script automatically uses CUDA if available.
-
----
-
-## Quickstart
-
-```bash
-# 1. Collect initial training data (run for a few minutes, move the object around)
-python capture_motion_dataset.py
-
-# 2. (Optional) Review and correct bounding boxes
-python box_corrector.py
-
-# 3. Train the model
-python train_torch_detector.py
-
-# 4. Run the detector — enable autosave with 'a' to keep improving the dataset
-python run_can_detector.py
-```
-
-Repeat steps 1 → 3 (or just 3) as you accumulate more autosaved data to iteratively improve model accuracy.
+Labels use absolute pixel coordinates. An empty label file marks a negative (background-only) sample.
 
 ---
 
 ## Model
 
-The detector uses **Faster R-CNN with a ResNet-50 FPN backbone**, fine-tuned for a two-class problem (background + target object). The backbone is initialized from ImageNet pretrained weights; only the box predictor head is replaced for the custom class count.
+Faster R-CNN with a ResNet-50 FPN backbone, fine-tuned as a two-class detector (background + target object). Only the box predictor head is replaced — the backbone stays pretrained — which makes it practical to train on small, self-collected datasets.
 
-This architecture provides a strong accuracy/speed tradeoff for single-object desktop detection scenarios and is robust enough to generalize from relatively small datasets when combined with the active learning loop described above.
+---
+
+## Requirements
+
+```bash
+pip install torch torchvision opencv-python numpy Pillow
+```
+
+GPU training is recommended but not required. The training script automatically uses CUDA if available.
 
 ---
 
@@ -188,14 +175,10 @@ This architecture provides a strong accuracy/speed tradeoff for single-object de
 
 ```
 ├── capture_motion_dataset.py   # Data collection
-├── box_corrector.py            # Annotation correction tool
+├── box_corrector.py            # Annotation tool
 ├── train_torch_detector.py     # Model training
 ├── run_can_detector.py         # Live inference + autosave
 ├── dataset/                    # Created automatically
-│   ├── flat/
-│   ├── labels/
-│   ├── boxed/
-│   └── splits/
 └── models/                     # Created automatically
     └── frcnn_best.pth
 ```
